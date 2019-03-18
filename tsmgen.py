@@ -19,16 +19,22 @@ class Kernel:
         self.blockSize = blockSize
         text = ""
         self.mod = None
+        self.function = None
 
     def get_function(self):
-        self.mod = SourceModule(self.text, arch="sm_60")
+
         return self.mod.get_function(self.name)
 
     def run(self, A, B, C, K):
         minimumBlockCount = (self.M * self.N // self.TM // self.TN - 1) // self.blockSize + 1
         deviceBlockCount = 24
 
-        self.get_function()(
+        if self.mod is None:
+            self.mod = SourceModule(self.text, arch="sm_70")
+        if self.function is None:
+            self.function = self.mod.get_function(self.name)
+
+        self.function(
             drv.In(A),
             drv.In(B),
             drv.Out(C),
@@ -90,20 +96,25 @@ def genCode(M, N, TM, TN, blockSize):
     return kernel
 
 
-def compileAndRun(kernel, K):
-    print(kernel.text)
+def testKernel(kernel, K):
 
-    A = numpy.ones((K, kernel.M), dtype=numpy.float64)
-    B = numpy.ones((K, kernel.N), dtype=numpy.float64)
+    A = numpy.around(numpy.random.randn(K, kernel.M).astype(numpy.float64))
+    B = numpy.around(numpy.random.randn(K, kernel.N).astype(numpy.float64))
     C = numpy.ones((kernel.M, kernel.N), dtype=numpy.float64)
 
     kernel.run(A, B, C, K)
 
-    print(C)
+    np_ref = numpy.matmul(numpy.transpose(A), B)
+    if numpy.sum(np_ref-C) != 0:
+        print(K)
+        print (np_ref)
+        print(C)
+    print(".", end="", flush=True)
+
+    
+def testSeries(kernel):
+    for i in range(0, 20):
+        krange = 10**numpy.random.randint(1, 7)
+        testKernel(genCode(4, 4, 1, 1, 256), numpy.random.randint(1, krange))
     print()
-
-
-compileAndRun(genCode(4, 4, 1, 1, 256), 10000000)
-compileAndRun(genCode(4, 4, 2, 2, 256), 10000000)
-compileAndRun(genCode(4, 4, 1, 4, 256), 10000000)
-compileAndRun(genCode(4, 4, 4, 1, 256), 10000000)
+testSeries(genCode(4, 4, 2, 2, 256))
