@@ -1,120 +1,60 @@
 #!/bin/python
 
-import pycuda
-import pycuda.autoinit
-
+from kernel import Kernel
+import numpy as np
 import pycuda.driver as drv
-import numpy
 
-from pycuda.compiler import SourceModule
+maxBufferElements = 128 * 1024 * 1024
 
-
-class Kernel:
-    def __init__(self, M, N, TM, TN, blockSize):
-        self.M = M
-        self.N = N
-        self.TM = TM
-        self.TN = TN
-        self.name = "tsmttsm_{0}_{1}_{2}_{3}".format(M, N, TM, TN)
-        self.blockSize = blockSize
-        text = ""
-        self.mod = None
-        self.function = None
-
-    def get_function(self):
-
-        return self.mod.get_function(self.name)
-
-    def run(self, A, B, C, K):
-        minimumBlockCount = (self.M * self.N // self.TM // self.TN - 1) // self.blockSize + 1
-        deviceBlockCount = 24
-
-        if self.mod is None:
-            self.mod = SourceModule(self.text, arch="sm_70")
-        if self.function is None:
-            self.function = self.mod.get_function(self.name)
-
-        self.function(
-            drv.In(A),
-            drv.In(B),
-            drv.Out(C),
-            numpy.int32(K),
-            block=(256, 1, 1),
-            grid=(max(deviceBlockCount, minimumBlockCount), 1))
+A_gpu = drv.mem_alloc(maxBufferElements * 8)
+B_gpu = drv.mem_alloc(maxBufferElements * 8)
+C_gpu = drv.mem_alloc(128 * 128 * 8)
 
 
-def genCode(M, N, TM, TN, blockSize):
+def benchKernel(kernel, K):
 
-    if M % TM != 0 or N % TN != 0:
-        print("Tilesize does not match: M % TM != 0 or N % TN != 0\n")
-        return ""
+    kernel.run(A_gpu, B_gpu, C_gpu, K)
 
-    kernel = Kernel(M, N, TM, TN, blockSize)
+    def timeKernel():
+        start = drv.Event()
+        end = drv.Event()
 
-    mthreads = M // TM
-    nthreads = N // TN
-    threadsPerSlice = mthreads * nthreads
+        start.record()
+        kernel.run(A_gpu, B_gpu, C_gpu, K)
+        end.record()
+        end.synchronize()
+        return end.time_since(start)
 
-    dtype = "double"
-    kernel.text = "void __global__ {0} ({1}* A, {1}* B, {1}* C, int K) {{\n".format(kernel.name, dtype)
-    kernel.text += "    int tidx = threadIdx.x + blockIdx.x*blockDim.x;\n"
-    kernel.text += "    int sliceId = tidx / {};\n".format(threadsPerSlice)
-    kernel.text += "    int midx = tidx % {};\n".format(mthreads)
-    kernel.text += "    int nidx = (tidx / {})  % {};\n".format(mthreads, nthreads)
-    kernel.text += "\n"
+    dts = [timeKernel() for i in range(0, 1)]
 
-    kernel.text += "    if( tidx >= (gridDim.x*blockDim.x/{0})*{0}) return;\n\n".format(threadsPerSlice)
+    dt = min(dts)
 
-    for m in range(0, TM):
-        kernel.text += "    {} ".format(dtype)
-        first = True
-        for n in range(0, TN):
-            if not first:
-                kernel.text += ", "
-            first = False
-            kernel.text += "tS{}_{}=0".format(m, n)
+    bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
+    flops = kernel.M * K * kernel.N * 2 / dt / 10**6
 
-        kernel.text += ";\n"
-    kernel.text += "\n"
-
-    kernel.text += "    for( int idx = sliceId; idx < K; idx += (gridDim.x*{})/{}){{\n".format(
-        blockSize, threadsPerSlice)
-
-    for m in range(0, TM):
-        for n in range(0, TN):
-            kernel.text += "        tS{0}_{1} += A[idx*{2} + midx*{4} + {0}] * B[idx*{3} + nidx*{5} + {1}];\n".format(
-                m, n, M, N, TM, TN)
-
-    kernel.text += "    }\n"
-
-    for m in range(0, TM):
-        for n in range(0, TN):
-            kernel.text += "    atomicAdd(C + (midx*{0} + {2}) * {4} +  (nidx*{1} + {3}), tS{2}_{3});\n".format(
-                TM, TN, m, n, N)
-
-    kernel.text += "}\n"
-    return kernel
+    print("{:6.3f}  {:6.1f}  {:6.1f}".format(dt, bw, flops))
 
 
-def testKernel(kernel, K):
+#for MN in range(64, 65):
+#    for TM in range(1, 17):
+#        for TN in range(1, 17):
+#            if MN % TM != 0 or MN % TN != 0:
+#                continue
+#            print( str(MN) + "  " + str(TM) + " " + str(TN) + ":  ", end="")
 
-    A = numpy.around(numpy.random.randn(K, kernel.M).astype(numpy.float64))
-    B = numpy.around(numpy.random.randn(K, kernel.N).astype(numpy.float64))
-    C = numpy.ones((kernel.M, kernel.N), dtype=numpy.float64)
+kernel = Kernel(64, 64, 8, 8, 256)
 
-    kernel.run(A, B, C, K)
+warpAddresses = [kernel.genAddresses(warpLane) for warpLane in range(0, 32)]
 
-    np_ref = numpy.matmul(numpy.transpose(A), B)
-    if numpy.sum(np_ref-C) != 0:
-        print(K)
-        print (np_ref)
-        print(C)
-    print(".", end="", flush=True)
+L1CLs = [set([warpAddresses[warpLane][load][1] // 128 for warpLane in range(0, 32)])
+                 for load in range(len(warpAddresses[0]))]
 
-    
-def testSeries(kernel):
-    for i in range(0, 20):
-        krange = 10**numpy.random.randint(1, 7)
-        testKernel(genCode(4, 4, 1, 1, 256), numpy.random.randint(1, krange))
-    print()
-testSeries(genCode(4, 4, 2, 2, 256))
+L1cycles = sum([len(load) for load in L1CLs])
+
+print(warpAddresses)
+print()
+print(L1CLs)
+
+print(L1cycles)
+print(8*8)
+
