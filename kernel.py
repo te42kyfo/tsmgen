@@ -53,13 +53,13 @@ class Kernel:
         self.text += "    for( size_t idx = sliceId; idx < K; idx += (gridDim.x*{})/{}){{\n".format(
             blockSize, threadsPerSlice)
 
-
         for m in range(0, TM):
             for n in range(0, TN):
                 if (M % TM == 0 and N % TN == 0) or (m < M % TM and n < N % TN):
                     self.text += ("        tS{0}_{1} += "
-                                  "A[idx*{2} + midx*{4} + {0}] * "
-                                  "B[idx*{3} + nidx*{5} + {1}];\n").format(m, n, M, N, TM, TN)
+                                  "__ldg( A + idx*{2}  + midx*{4} + {0}) * "
+                                  "__ldg( B + idx*{3} + nidx*{5} + {1});\n").format(
+                                      m, n, M, N, TM, TN)
 
         self.text += "    }\n"
 
@@ -109,10 +109,13 @@ class Kernel:
         if self.blockSize * self.function.num_regs > pycuda.tools.DeviceData().registers:
             return
 
-        tb_per_mp = pycuda.tools.OccupancyRecord(pycuda.tools.DeviceData(), self.blockSize, 0,
-                                                 self.function.num_regs).tb_per_mp
+        tb_per_mp = self.estimateBlockCount(self.function.num_regs)
 
         block = (self.blockSize, 1, 1)
         grid = (max(self.multiprocessor_count * tb_per_mp, minimumBlockCount), 1)
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
+
+    def estimateBlockCount(self, registers):
+        return min(64 // (self.blockSize // 32),
+                   65536 // (max(32, registers) * self.blockSize))
