@@ -72,34 +72,21 @@ def benchKernel(kernel, K):
 
 
 
-
-
-kernels = [
-    Kernel(1, 1, 1, 1, 256),
-    Kernel(4, 4, 1, 1, 256),
-    Kernel(4, 4, 2, 2, 256),
-    Kernel(4, 4, 4, 1, 256),
-    Kernel(4, 4, 4, 4, 256),
-    Kernel(8, 8, 1, 1, 256),
-    Kernel(8, 8, 4, 4, 256),
-    Kernel(8, 8, 8, 1, 256),
-    Kernel(8, 8, 8, 8, 256),
-    Kernel(32, 32, 1, 1, 256),
-    Kernel(32, 32, 4, 4, 256),
-    Kernel(32, 32, 8, 1, 256),
-    Kernel(32, 32, 8, 8, 256),
-    Kernel(32, 32, 10, 10, 256),
-    Kernel(64, 64, 2, 2, 256),
-    Kernel(64, 64, 8, 8, 256),
-    Kernel(64, 64, 10, 10, 256),
-    Kernel(64, 64, 16, 1, 256)
-]
-
+kernels = []
 memPreds0 = []
 memPreds1 = []
 L1Preds = []
 ALUPreds = []
 flopses = []
+
+
+for MN in [1, 2, 4, 8, 16, 32, 64]:
+    for TM in range(1, 65):
+        TN = TM
+        if MN % TN != 0 or MN % TM != 0:
+            continue
+        kernels.append(Kernel(MN, MN, TM, TN, 256))
+
 
 for kernel in kernels:
     memPred = predictMemory(kernel)
@@ -116,14 +103,13 @@ for kernel in kernels:
     print("ALU:       {:7.0f}".format(ALUPred))
     flops = benchKernel(kernel, maxBufferElements // (kernel.M + kernel.N))
     flopses.append(flops)
+
+    printSASS(kernel.text)
     print()
-
-
 
 fig, ax = plt.subplots()
 fig.set_figwidth(16)
 fig.set_figheight(8)
-
 
 plt.ioff()
 ax.bar(np.arange(0, len(kernels)) - 0.225, memPreds0, width=0.15)
@@ -132,13 +118,17 @@ ax.bar(np.arange(0, len(kernels)) + 0.075, L1Preds, width=0.15)
 ax.bar(np.arange(0, len(kernels)) + 0.225, ALUPreds, width=0.15)
 
 ax.hlines([min(z) for z in zip(memPreds0, memPreds1, L1Preds, ALUPreds)],
-           np.arange(0, len(kernels)) + -0.3,
-           np.arange(0, len(kernels)) + 0.3)
+          np.arange(0, len(kernels)) + -0.3,
+          np.arange(0, len(kernels)) + 0.3)
 
 ax.plot(np.arange(0, len(kernels)), flopses, "X", color="black")
 
 ax.set_ylim((0, 8000))
+ax.set_xlim((-1, len(kernels)))
 
 ax.set_xticks(np.arange(0, len(kernels)))
-ax.set_xticklabels( [kernel.name for kernel in kernels], rotation=45, ha="right", rotation_mode="anchor")
+ax.set_xticklabels([kernel.name for kernel in kernels],
+                   rotation=45,
+                   ha="right",
+                   rotation_mode="anchor")
 plt.savefig("perf.png", dpi=300, pad_inches=0.0, bbox_inches="tight")
