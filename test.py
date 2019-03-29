@@ -42,5 +42,5 @@ for i in range(1, 33):
         if i % t != 0:
             continue
         print(str(t) + " " + str(i) + ":  ")
-        kernel = Kernel(i, i, t, t, 256)
+        kernel = Kernel(i, i, t, t, 256, reduction="localAtomic")
         testSeries(kernel)

@@ -8,7 +8,7 @@ from pycuda.compiler import SourceModule
 
 
 class Kernel:
-    def __init__(self, M, N, TM, TN, blockSize):
+    def __init__(self, M, N, TM, TN, blockSize, reduction="globalAtomic"):
         self.M = M
         self.N = N
         self.TM = TM
@@ -35,6 +35,14 @@ class Kernel:
         self.text += "    int midx = tidx % {};\n".format(mthreads)
         self.text += "    int nidx = (tidx / {})  % {};\n".format(mthreads, nthreads)
         self.text += "\n"
+        if reduction == "localAtomic":
+            self.text += "    __shared__ {} blockResults[{}][{}];\n".format(dtype, mthreads, nthreads)
+            self.text += "    for(int i = threadIdx.x; i < {}; i += {}) {{\n".format(
+                self.M * self.N, self.blockSize)
+            self.text += "        reinterpret_cast< {}*>(blockResults)[i] = 0.0;\n    }}\n".format(
+                dtype)
+            self.text += "     __syncthreads();\n"
+
         self.text += "    if( tidx >= (gridDim.x*blockDim.x/{0})*{0}) return;\n\n".format(
             threadsPerSlice)
 
@@ -63,17 +71,31 @@ class Kernel:
 
         self.text += "    }\n"
 
-        #self.text += "    if( tidx == 231) {\n"
         for m in range(0, TM):
             for n in range(0, TN):
 
-                #self.text += ("    atomicAdd(C + (midx*{0} + {2} ) * {4} +  (nidx*{1} + {3}), "
-                #              "tS{2}_{3});\n").format(TM, TN, m, n, N)
-                self.text += ("   C[(midx*{0} + {2} ) * {4} +  (nidx*{1} + {3})]"
-                              "= tS{2}_{3};\n").format(TM, TN, m, n, N)
+                if reduction == "globalAtomic":
+                    self.text += ("    atomicAdd(C + (midx*{0} + {2} ) * {4} +  (nidx*{1} + {3}), "
+                                  "tS{2}_{3});\n").format(TM, TN, m, n, N)
+                elif reduction == "localAtomic":
+                    self.text += "    atomicAdd(&(blockResults[midx*{0} + {2}][nidx*{1} + {3}]), tS{2}_{3});\n".format(
+                        TM, TN, m, n)
 
-        #self.text += "    }\n"
+                else:
+                    self.text += ("   C[(midx*{0} + {2} ) * {4} +  (nidx*{1} + {3})]"
+                                  "= tS{2}_{3};\n").format(TM, TN, m, n, N)
+
+        if reduction == "localAtomic":
+            self.text += "    __syncthreads();\n"
+            self.text += "    int participants = __syncthreads_count(1);\n"
+            self.text += "     for(int i = threadIdx.x; i < {}; i += participants) {{\n".format(
+                self.M * self.N, self.blockSize)
+            self.text += "        atomicAdd(C + i, reinterpret_cast<{}*>(blockResults)[i]);\n".format(
+                dtype)
+            self.text += "    }\n"
+
         self.text += "} \n"
+
         #print(self.text)
 
     def genAddresses(self, tidx):
@@ -112,10 +134,12 @@ class Kernel:
         tb_per_mp = self.estimateBlockCount(self.function.num_regs)
 
         block = (self.blockSize, 1, 1)
-        grid = (max(self.multiprocessor_count * tb_per_mp, minimumBlockCount), 1)
+        grid = (max(
+            min(self.multiprocessor_count * tb_per_mp * 2,
+                self.M * self.N * K // self.TM // self.TN // 1 // self.blockSize),
+            minimumBlockCount), )
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
     def estimateBlockCount(self, registers):
-        return min(64 // (self.blockSize // 32),
-                   65536 // (max(32, registers) * self.blockSize))
+        return min(64 // (self.blockSize // 32), 65536 // (max(32, registers) * self.blockSize))
