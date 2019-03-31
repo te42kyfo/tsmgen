@@ -1,4 +1,4 @@
 [style]
 based_on_style = google
-column_limit: 100
+column_limit: 90
 SPLIT_BEFORE_DOT: True

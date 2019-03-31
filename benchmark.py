@@ -2,7 +2,7 @@
 import pycuda.driver as drv
 
 
-maxBufferElements = 128 * 1024 * 1024
+maxBufferElements = 512 * 1024 * 1024
 
 A_gpu = drv.mem_alloc(maxBufferElements * 8)
 B_gpu = drv.mem_alloc(maxBufferElements * 8)
@@ -42,7 +42,8 @@ def benchKernel(kernel, K, iters=10):
 
     dts = [timeKernel() for i in range(0, iters)]
 
-    dt = min(dts)
+    dts.sort()
+    dt = dts[1 if len(dts) > 2 else 0]
 
     bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
     flops = kernel.M * K * kernel.N * 2 / dt / 10**6

@@ -25,7 +25,7 @@ def testKernel(kernel, K):
     if np.sum(np_ref - C) != 0:
         print("  -- Verification Fail, wrong Results --")
         print(K)
-        print(np_ref)
+        print(np_ref - C)
         print(C)
     print(str(K) + " ", end="", flush=True)
 
@@ -44,3 +44,4 @@ for i in range(1, 33):
         print(str(t) + " " + str(i) + ":  ")
         kernel = Kernel(i, i, t, t, 256, reduction="localAtomic")
         testSeries(kernel)
+        #print(kernel.text)
