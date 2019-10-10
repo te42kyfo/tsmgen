@@ -1,6 +1,7 @@
-
+from pynvml import *
 import pycuda.driver as drv
 
+nvmlInit()
 
 maxBufferElements = 512 * 1024 * 1024
 
@@ -28,14 +29,35 @@ def printSASS(code):
     newFile.write(result.stdout)
     newFile.close()
 
+def measurePower(kernel, K):
+    device = nvmlDeviceGetHandleByIndex(0)
+    start = drv.Event()
+    end = drv.Event()
+
+    start.record()
+    kernel.run(A_gpu, B_gpu, C_gpu, K)
+    kernel.run(A_gpu, B_gpu, C_gpu, K)
+    temp = nvmlDeviceGetTemperature(device, NVML_TEMPERATURE_GPU)
+    clock = nvmlDeviceGetClockInfo(device, NVML_CLOCK_SM)
+    power = nvmlDeviceGetPowerUsage(device)
+
+
+    end.record()
+    end.synchronize()
+    return (clock, power, temp)
+
+
+
 
 def benchKernel(kernel, K, iters=10):
+
     def timeKernel():
         start = drv.Event()
         end = drv.Event()
 
         start.record()
         kernel.run(A_gpu, B_gpu, C_gpu, K)
+
         end.record()
         end.synchronize()
         return end.time_since(start)
@@ -48,5 +70,5 @@ def benchKernel(kernel, K, iters=10):
     bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
     flops = kernel.M * K * kernel.N * 2 / dt / 10**6
 
-    print("{:5.2f} {:6.0f} {:6.0f}".format(dt, bw, flops))
-    return flops
+
+    return (dt, flops, bw)
