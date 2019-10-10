@@ -1,7 +1,7 @@
 from kernel import Kernel
 import numpy as np
 import pycuda.driver as drv
-
+import termcolor as tc
 
 def testKernel(kernel, K):
 
@@ -22,26 +22,33 @@ def testKernel(kernel, K):
     drv.memcpy_dtoh(C, C_gpu)
 
     np_ref = np.matmul(np.transpose(A), B)
+    passed = True
     if np.sum(np_ref - C) != 0:
-        print("  -- Verification Fail, wrong Results --")
+        print(tc.colored("  -- Verification Fail, wrong Results --", "red"))
         print(K)
         print(np_ref - C)
         print(C)
+        passed = False
     print(str(K) + " ", end="", flush=True)
-
+    return passed
 
 def testSeries(kernel):
+    passed = True
     for i in range(0, 10):
-        krange = 10**np.random.randint(1, 6)
-        testKernel(kernel, np.random.randint(1, krange))
+        krange = 10**np.random.randint(1, 7)
+        passed &= testKernel(kernel, np.random.randint(1, krange))
     print()
+    return passed
 
 
-for i in range(1, 33):
-    for t in range(1, 17):
-        if i % t != 0:
-            continue
-        print(str(t) + " " + str(i) + ":  ")
-        kernel = Kernel(i, i, t, t, 256, reduction="localAtomic")
-        testSeries(kernel)
-        #print(kernel.text)
+for i in range(1,32 ):
+    for tm in range(1, i+1):
+        for tn in range(1, i+1):
+
+            print(str(i) + " " + str(tm) + " " + str(tn) + ":  ")
+            kernel = Kernel(i, i, tm, tn, 256, reduction="localAtomic", leapFrog=True)
+
+
+            if not testSeries(kernel):
+                print(kernel.text)
+                exit()
