@@ -1,4 +1,5 @@
 import pycuda
+import math
 import pycuda.autoinit
 
 import pycuda.driver as drv
@@ -8,8 +9,7 @@ from pycuda.compiler import SourceModule
 
 
 class Kernel:
-
-    def __init__(self, M, N, TM, TN, blockSize, reduction="globalAtomic"):
+    def __init__(self, M, N, TM, TN, blockSize, unroll=1, reduction="globalAtomic", leapFrog=False):
         self.M = M
         self.N = N
         self.TM = TM
@@ -29,7 +29,11 @@ class Kernel:
         threadsPerSlice = mthreads * nthreads
 
         dtype = "double"
-        self.text = "void __global__ __launch_bounds__({2}) {0} ({1}* A, {1}* B, {1}* C, size_t K) {{\n".format(
+
+        minBlockCount = min(16, max(1, 65536 // blockSize // ((TM * TN + TM + TN) * 2 + 30)),
+                            64 // (blockSize // 32))
+
+        self.text = "void __global__ __launch_bounds__({2}) {0} ({1}* A, {1}* B, {1}* C, int64_t K) {{\n".format(
             self.name, dtype, self.blockSize)
         self.text += "  int tidx = threadIdx.x + blockIdx.x*blockDim.x;\n"
         self.text += "  int sliceId = tidx / {};\n".format(threadsPerSlice)
@@ -37,12 +41,12 @@ class Kernel:
         self.text += "  int nidx = (tidx / {})  % {};\n".format(mthreads, nthreads)
         self.text += "\n"
         if reduction == "localAtomic":
-            self.text += "  __shared__ {} blockResults[{}][{}];\n".format(
-                dtype, mthreads, nthreads)
-            self.text += "for( int id = threadIdx.x; id <  {}; id += {})\n".format(mthreads*nthreads, self.blockSize)
-            self.text += "    blockResults[id/{0}][id%{0}] = 0.0;\n".format(mthreads)
- 
-            self.text += "     __syncthreads();\n"
+            self.text += "  __shared__ {} blockResults[{}][{}];\n".format(dtype, mthreads, nthreads)
+            self.text += "  for( int id = threadIdx.x; id <  {}; id += {})\n".format(
+                mthreads * nthreads, self.blockSize)
+            self.text += "    blockResults[id%{0}][id/{0}] = 0.0;\n\n".format(mthreads)
+
+            self.text += "  __syncthreads();\n"
 
         self.text += "  if( tidx >= (gridDim.x*blockDim.x/{0})*{0}) return;\n\n".format(
             threadsPerSlice)
@@ -59,24 +63,89 @@ class Kernel:
             self.text += ";\n"
         self.text += "\n"
 
-        self.text += "  for( size_t idx = sliceId; idx < K; idx += (gridDim.x*{})/{}){{\n".format(
-            blockSize, threadsPerSlice)
+        self.text += "  int gridStride = (gridDim.x*{})/{};\n".format(blockSize, threadsPerSlice)
 
-        for m in range(0, TM):
-            self.text += "    {0} vA_{1} = __ldg( A + idx*{2}  + midx*{3} + {1});\n".format(
-                dtype, m, M, TM)
+        def generateLoad(name, array, dtype, X, TX, x, u, tileIdx, xthreads, idx):
+            loadText = ""
+            loadText += "{0} {1}_{2}_{3} = ".format(dtype, name, x, u)
+            ldgText = "__ldg( {0} + ({6}+{4}*gridStride)*{2}  + {5}*{3} + {1})".format(
+                array, x, X, TX, u, tileIdx, idx)
+            if x >= X % TX and X % TX != 0:
+                loadText += "  ( {} < {} ) ?  {} : 0.0;\n".format(tileIdx, xthreads - 1, ldgText)
+            else:
+                loadText += ldgText + ";\n"
+            return loadText
 
-        for n in range(0, TN):
-            self.text += "    {0} vB_{1} = __ldg( B + idx*{2}  + nidx*{3} + {1});\n".format(
-                dtype, n, N, TN)
+        if leapFrog:
+            for u in range(0, unroll):
+                for m in range(0, TM):
+                    self.text += "  {} vANow_{}_{} = 0.0;\n".format(dtype, m, u)
+                self.text += "\n"
+                for n in range(0, TN):
+                    self.text += "  {} vBNow_{}_{} = 0.0;\n".format(dtype, n, u)
+            # Check if size is even that big
+            self.text += "  if( sliceId < K) {\n"
+            for u in range(0, unroll):
+                for m in range(0, TM):
+                    self.text += generateLoad("vANow", "A", "  ", M, TM, m, u, "midx", mthreads,
+                                              "sliceId")
+                self.text += "\n"
+                for n in range(0, TN):
+                    self.text += generateLoad("vBNow", "B", "  ", N, TN, n, u, "nidx", nthreads,
+                                              "sliceId")
+            self.text += "  }\n"
 
-        for m in range(0, TM):
-            for n in range(0, TN):
-                if (M % TM == 0 and N % TN == 0) or (m < M % TM and n < N % TN):
-                    self.text += "    tS{0}_{1} += vA_{0} * vB_{1};\n".format(m, n)
+        ## -------------   iteration loop --------
+        self.text += "  int64_t idx = sliceId\n;"
+        self.text += "  for(idx = sliceId; idx < K{0}; idx += gridStride*{1}){{\n".format(
+            " - gridStride" if leapFrog else "", unroll)
+
+        for u in range(0, unroll):
+            if leapFrog:
+                for m in range(0, TM):
+                    self.text += generateLoad("vANext", "A", "    " + dtype, M, TM, m, u, "midx",
+                                              mthreads, "idx + gridStride")
+
+                self.text += "\n"
+                for n in range(0, TN):
+                    self.text += generateLoad("vBNext", "B", "    " + dtype, N, TN, n, u, "nidx",
+                                              nthreads, "idx + gridStride")
+            else:
+                for m in range(0, TM):
+                    self.text += generateLoad("vANow", "A", "    " + dtype, M, TM, m, u, "midx",
+                                              mthreads, "idx")
+
+                self.text += "\n"
+                for n in range(0, TN):
+                    self.text += generateLoad("vBNow", "B", "    " + dtype, N, TN, n, u, "nidx",
+                                              nthreads, "idx")
+
+            self.text += "\n"
+            for m in range(0, TM):
+                for n in range(0, TN):
+                    self.text += "    tS{0}_{1} += vANow_{0}_{2} * vBNow_{1}_{2};\n".format(m, n, u)
+
+            if leapFrog:
+                for m in range(0, TM):
+                    self.text += "    vANow_{0}_{1} = vANext_{0}_{1};\n".format(m, u)
+
+                self.text += "\n"
+                for n in range(0, TN):
+                    self.text += "    vBNow_{0}_{1} = vBNext_{0}_{1};\n".format(n, u)
 
         self.text += "  }\n"
 
+        ## -------- post iteration ----
+        if leapFrog:
+            self.text += "  if( idx < K) {\n"
+            for u in range(0, unroll):
+                for m in range(0, TM):
+                    for n in range(0, TN):
+                        self.text += "    tS{0}_{1} += vANow_{0}_{2} * vBNow_{1}_{2};\n".format(
+                            m, n, u)
+            self.text += "  }\n"
+
+        ## ----------- reduction ----------------
         if reduction == "localAtomic":
             self.text += "  int participants =  __syncthreads_count(true);\n"
             #self.text += "if(participants != 256) printf(\" %d participants  \\n \", participants);\n"
@@ -84,25 +153,36 @@ class Kernel:
         for m in range(0, TM):
             for n in range(0, TN):
 
+                conditionals = []
+                if m >= M % TM and M % TM != 0:
+                    conditionals.append("{0} < " + str(mthreads - 1))
+                if n >= (N % TN) and N % TN != 0:
+                    conditionals.append("{1} < " + str(nthreads - 1))
+
+                writeProtectText = ""
+                if len(conditionals) > 0:
+                    writeProtectText += "    if ( " + " && ".join(conditionals) + "  )\n  "
+
+                redText = ""
                 if reduction == "globalAtomic":
-                    self.text += (
-                        "  atomicAdd(C + (midx*{0} + {2} ) * {4} +  (nidx*{1} + {3}), "
-                        "tS{2}_{3});\n").format(TM, TN, m, n, N)
+                    self.text += writeProtectText.format("midx", "nidx")
+                    self.text += ("  atomicAdd(C + (midx*{0} + {2} ) * {4} +  (nidx*{1} + {3}), "
+                                  "tS{2}_{3});\n").format(TM, TN, m, n, N)
                 elif reduction == "localAtomic":
                     self.text += "  __syncthreads();\n"
-                    self.text += "  atomicAdd(&blockResults[midx][nidx], tS{0}_{1});\n".format(
-                        m, n)
+                    self.text += "  atomicAdd(&blockResults[midx][nidx], tS{0}_{1});\n".format(m, n)
                     self.text += "  __syncthreads();\n"
                     self.text += "  for(int id = threadIdx.x; id < {}; id += participants) {{\n".format(
                         mthreads * nthreads)
-                    self.text += "    int tMidx = id / {};\n".format(mthreads)
-                    self.text += "    int tNidx = id % {};\n".format(nthreads)
-
+                    self.text += "    int tMidx = id % {};\n".format(mthreads)
+                    self.text += "    int tNidx = id / {};\n".format(mthreads)
+                    self.text += writeProtectText.format("tMidx", "tNidx")
                     self.text += ("    atomicAdd(C + (tMidx + {0})*{2} + tNidx + {1}, "
                                   "blockResults[tMidx][tNidx]);\n").format(m, n, N)
                     self.text += "    blockResults[tMidx][tNidx] = 0.0;\n"
                     self.text += "  }\n"
                 elif reduction == "store":
+                    self.text += writeProtectText.format("midx", "nidx")
                     self.text += ("      C[(midx*{0} + {2} ) * {4} +  (nidx*{1} + {3})]"
                                   "= tS{2}_{3};\n").format(TM, TN, m, n, N)
                 else:
@@ -121,11 +201,12 @@ class Kernel:
         nthreads = (self.N - 1) // self.TN + 1
 
         for m in range(0, self.TM):
-            addresses.append(("A", (tidx // mthreads // nthreads * self.M +
-                                    (tidx % mthreads) * self.TM + m) * 8))
+            addresses.append(
+                ("A",
+                 (tidx // mthreads // nthreads * self.M + (tidx % mthreads) * self.TM + m) * 8))
         for n in range(0, self.TN):
-            addresses.append(("B", (tidx // mthreads // nthreads * self.N + (
-                (tidx // mthreads) % nthreads) * self.TN + n) * 8))
+            addresses.append(("B", (tidx // mthreads // nthreads * self.N +
+                                    ((tidx // mthreads) % nthreads) * self.TN + n) * 8))
 
         return addresses
 
@@ -135,24 +216,31 @@ class Kernel:
             self.multiprocessor_count = drv.Context.get_device().get_attributes()[
                 drv.device_attribute.MULTIPROCESSOR_COUNT]
         if self.mod is None:
-            self.mod = SourceModule(self.text, arch="sm_70")
+            self.mod = SourceModule(self.text, arch="sm_70", options=["-lineinfo"])
         if self.function is None:
             self.function = self.mod.get_function(self.name)
             self.function.prepare(('P', 'P', 'P', numpy.int64))
 
-        minimumBlockCount = max(
-            1, (self.M * self.N // self.TM // self.TN - 1) // self.blockSize + 1)
+        minimumBlockCount = max(1,
+                                (self.M * self.N // self.TM // self.TN - 1) // self.blockSize + 1)
 
         if self.blockSize * self.function.num_regs > pycuda.tools.DeviceData().registers:
             return
 
         tb_per_mp = self.estimateBlockCount(self.function.num_regs)
 
+        threadsPerSlice = math.ceil(self.M / self.TM) * math.ceil(self.N / self.TN)
+
         block = (self.blockSize, 1, 1)
-        grid = (max(self.multiprocessor_count * tb_per_mp * 2, minimumBlockCount),)
+        grid = (int(
+            max(
+                min(
+                    max(self.multiprocessor_count * tb_per_mp * 0.3,
+                        (threadsPerSlice * K)**0.6  // self.blockSize),
+                    self.multiprocessor_count * tb_per_mp), minimumBlockCount)), )
+
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
     def estimateBlockCount(self, registers):
-        return min(64 // (self.blockSize // 32),
-                   65536 // (max(32, registers) * self.blockSize))
+        return min(64 // (self.blockSize // 32), 65536 // (max(32, registers) * self.blockSize))
