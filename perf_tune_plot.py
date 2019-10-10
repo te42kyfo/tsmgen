@@ -9,40 +9,51 @@ conn = sqlite3.connect('benchmarks.db')
 c = conn.cursor()
 
 fig, ax = plt.subplots()
-fig.set_figwidth(5)
+fig.set_figwidth(6)
 fig.set_figheight(4)
 
 fig2, ax2 = plt.subplots()
-fig2.set_figwidth(5)
+fig2.set_figwidth(6)
 fig2.set_figheight(4)
 
 
 ax.plot(np.arange(1,65), np.minimum( 7066, np.arange(1,65) / 8 * 860), "--", color="gray", label="memory bandwidth limit")
 ax.plot(np.arange(1,65), np.ones((64))*7066, ":", color="gray", label="FP execution limit")
 
-for rev in range(3, 5):
-    bests = []
-    msizes = []
-    nsizes = []
-    for MN in range(1, 65):
-        c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0}  and revision={1}".format(MN, rev))
-        results = list(c)
 
-        if len(results) > 0:
-            results.sort(key=lambda r: r[10])
-            bests.append((results[-1][2], results[-1][10]))
-            msizes.append((results[-1][3], results[-1][4]))
-            nsizes.append((results[-1][2], results[-1][3] * results[-1][4]))
+bests = []
+msizes = []
+nsizes = []
+rev = 4
+for MN in range(1, 65):
+    c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0}  and revision={1}".format(MN, rev))
+    results = list(c)
 
-            #sizes.append(
-            #    (results[-1][2], results[-1][3] * results[-1][4] / (results[-1][4] + results[-1][3])))
+    if len(results) > 0:
+        results.sort(key=lambda r: r[10])
+        bests.append((results[-1][2], results[-1][10]))
+        msizes.append((results[-1][3], results[-1][4]))
+        nsizes.append((results[-1][2], results[-1][3] * results[-1][4]))
 
-    if len(bests) == 0:
-        break
-    print(str(rev) + ": " + str(len(bests)))
-    ax.plot(*zip(*bests), "o-", label="leap frog" if rev == 4 else "no leap frog", markersize=3)
-    ax2.plot(*zip(*msizes), "*", color="C" + str(rev))
-    #ax2.plot(*zip(*msizes), "--*",color="C" +str(rev))
+        #sizes.append(
+        #    (results[-1][2], results[-1][3] * results[-1][4] / (results[-1][4] + results[-1][3])))
+
+print(str(rev) + ": " + str(len(bests)))
+ax.plot(*zip(*bests), "o-", label="Tiles", markersize=3)
+ax2.plot(*zip(*msizes), "*", color="C" + str(rev))
+#ax2.plot(*zip(*msizes), "--*",color="C" +str(rev))
+
+bests = []
+for MN in range(1, 65):
+    c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0} and TM=1 and TN=1 and revision={1}".format(MN, rev))
+    results = list(c)
+
+    if len(results) > 0:
+        results.sort(key=lambda r: r[10])
+        bests.append((results[-1][2], results[-1][10]))
+
+ax.plot(*zip(*bests), "o-", label="K,M,N", markersize=3)
+
 
 conn.close()
 
@@ -65,7 +76,7 @@ data_cutlas = np.asarray([
 
 
 ax.plot(data_cublas, "o-", label="CUBLAS", markersize=3)
-ax.plot(data_cutlas, "o-", label="CUTLASS", markersize=3)
+#ax.plot(data_cutlas, "o-", label="CUTLASS", markersize=3)
 
 
 ax.grid(True)
@@ -73,8 +84,8 @@ ax.set_ylim((0, ax.get_ylim()[1]))
 ax.set_xticks([1] + list(range(8, 64 + 1, 8)))
 ax.set_xlabel("M=N")
 ax.set_ylabel("GFlop/s")
-ax.legend()
-fig.savefig("best_perf.pdf", dpi=300, pad_inches=0.0, bbox_inches="tight")
+ax.legend(loc=2)
+fig.savefig("best_perf_presentation.png", dpi=300, pad_inches=0.0, bbox_inches="tight")
 
 
 
@@ -86,6 +97,6 @@ ax2.set_ylim((0, 24))
 fig2.legend()
 #ax2.set_yticks([1] + list(range(5, 110, 5)))
 #ax2.set_xticks([1] + list(range(2, 64, 1)))
-fig2.savefig("best_perf_size.png", dpi=300, pad_inches=0.0, bbox_inches="tight")
+fig2.savefig("best_perf_size_presentation.png", dpi=300, pad_inches=0.0, bbox_inches="tight")
 
 plt.show()
