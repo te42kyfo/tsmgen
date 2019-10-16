@@ -68,12 +68,16 @@ class Kernel:
         def generateLoad(name, array, dtype, X, TX, x, u, tileIdx, xthreads, idx):
             loadText = ""
             loadText += "{0} {1}_{2}_{3} = ".format(dtype, name, x, u)
-            ldgText = "__ldg( {0} + ({6}+{4}*gridStride)*{2}  + {5}*{3} + {1})".format(
-                array, x, X, TX, u, tileIdx, idx)
-            if x >= X % TX and X % TX != 0:
-                loadText += "  ( {} < {} ) ?  {} : 0.0;\n".format(tileIdx, xthreads - 1, ldgText)
+            ldgText = "__ldg( {0} + ({6}+ {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
+                array, x, X, xthreads, u, tileIdx, idx)
+
+            if x == (X // xthreads) and X % xthreads != 0:
+                loadText += "  ( {} < {} ) ?  {} : 1.0;\n".format(tileIdx, X % xthreads, ldgText)
+            elif x > (X // xthreads) or (x == (X // xthreads) and X % xthreads == 0):
+                loadText += "  1.0;\n".format(tileIdx, X % TX, ldgText)
             else:
                 loadText += ldgText + ";\n"
+
             return loadText
 
         if leapFrog:
@@ -96,7 +100,7 @@ class Kernel:
             self.text += "  }\n"
 
         ## -------------   iteration loop --------
-        self.text += "  int64_t idx = sliceId\n;"
+        self.text += "  int64_t idx = sliceId;\n"
         self.text += "  for(idx = sliceId; idx < K{0}; idx += gridStride*{1}){{\n".format(
             " - gridStride" if leapFrog else "", unroll)
 
@@ -154,20 +158,27 @@ class Kernel:
             for n in range(0, TN):
 
                 conditionals = []
-                if m >= M % TM and M % TM != 0:
-                    conditionals.append("{0} < " + str(mthreads - 1))
-                if n >= (N % TN) and N % TN != 0:
-                    conditionals.append("{1} < " + str(nthreads - 1))
+                if M - m * mthreads < 1:
+                    conditionals.append("false")
+                if N - n * nthreads < 1:
+                    conditionals.append("false")
+
+                if M - m * mthreads < mthreads:
+                    conditionals.append("{0} < " + str(M - m * mthreads))
+                if N - n * nthreads < nthreads:
+                    conditionals.append("{1} < " + str(N - n * nthreads))
+
+
 
                 writeProtectText = ""
                 if len(conditionals) > 0:
-                    writeProtectText += "    if ( " + " && ".join(conditionals) + "  )\n  "
+                    writeProtectText += "  if ( " + " && ".join(conditionals) + "  )\n  "
 
                 redText = ""
                 if reduction == "globalAtomic":
                     self.text += writeProtectText.format("midx", "nidx")
-                    self.text += ("  atomicAdd(C + (midx*{0} + {2} ) * {4} +  (nidx*{1} + {3}), "
-                                  "tS{2}_{3});\n").format(TM, TN, m, n, N)
+                    self.text += ("  atomicAdd(C + ({2}*{0} + midx ) * {4} +  ({3}*{1} + nidx), "
+                                  "tS{2}_{3});\n").format(mthreads, nthreads, m, n, N)
                 elif reduction == "localAtomic":
                     self.text += "  __syncthreads();\n"
                     self.text += "  atomicAdd(&blockResults[midx][nidx], tS{0}_{1});\n".format(m, n)
@@ -236,9 +247,8 @@ class Kernel:
             max(
                 min(
                     max(self.multiprocessor_count * tb_per_mp * 0.3,
-                        (threadsPerSlice * K)**0.6  // self.blockSize),
+                        (threadsPerSlice * K)**0.6 // self.blockSize),
                     self.multiprocessor_count * tb_per_mp), minimumBlockCount)), )
-
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
