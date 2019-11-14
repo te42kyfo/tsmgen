@@ -1,5 +1,9 @@
 from pynvml import *
 import pycuda.driver as drv
+import pycuda
+import sys
+from subprocess import run, PIPE
+
 
 nvmlInit()
 
@@ -19,7 +23,7 @@ def printSASS(code):
     newFile.write(cubin)
     newFile.close()
 
-    result = run(["nvdisasm -c   temp.cusbin"], stdout=PIPE, shell=True)
+    result = run(["cuobjdump --dump-sass   temp.cusbin"], stdout=PIPE, shell=True)
 
     print(len(result.stdout.decode("utf-8").split("\n")))
 
@@ -51,6 +55,10 @@ def measurePower(kernel, K):
 
 def benchKernel(kernel, K, iters=10):
 
+    kernel.run(A_gpu, B_gpu, C_gpu, K)
+    if kernel.function.num_regs == 255:
+        return (1, 1, 1)
+    
     def timeKernel():
         start = drv.Event()
         end = drv.Event()
@@ -70,5 +78,7 @@ def benchKernel(kernel, K, iters=10):
     bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
     flops = kernel.M * K * kernel.N * 2 / dt / 10**6
 
+    
 
+    
     return (dt, flops, bw)
