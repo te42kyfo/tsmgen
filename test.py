@@ -41,14 +41,14 @@ def testSeries(kernel):
     return passed
 
 
-for i in range(1,32 ):
-    for tm in range(1, i+1):
-        for tn in range(1, i+1):
+for m in range(5,32 ):
+    for n in range(5,32 ):
+        for tm in range(3, m+1):
+            for tn in range(3, n+1):
+                print(str(m) + " " + str(n) + " " + str(tm) + " " + str(tn) + ":  ")
+                kernel = Kernel(m, n, tm, tn, 256, reduction="localAtomic", leapFrog=False)
 
-            print(str(i) + " " + str(tm) + " " + str(tn) + ":  ")
-            kernel = Kernel(i, i, tm, tn, 256, reduction="localAtomic", leapFrog=True)
 
-
-            if not testSeries(kernel):
-                print(kernel.text)
-                exit()
+                if not testSeries(kernel):
+                    print(kernel.text)
+                    exit()
