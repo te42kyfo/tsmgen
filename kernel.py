@@ -1,6 +1,8 @@
 import pycuda
 import math
 import pycuda.autoinit
+import sys
+from subprocess import run, PIPE
 
 import pycuda.driver as drv
 import numpy
@@ -168,8 +170,6 @@ class Kernel:
                 if N - n * nthreads < nthreads:
                     conditionals.append("{1} < " + str(N - n * nthreads))
 
-
-
                 writeProtectText = ""
                 if len(conditionals) > 0:
                     writeProtectText += "  if ( " + " && ".join(conditionals) + "  )\n  "
@@ -254,3 +254,4 @@ class Kernel:
 
     def estimateBlockCount(self, registers):
         return min(64 // (self.blockSize // 32), 65536 // (max(32, registers) * self.blockSize))
+
