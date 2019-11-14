@@ -5,54 +5,43 @@ import matplotlib
 import matplotlib.pyplot as plt
 import sqlite3
 
-conn = sqlite3.connect('benchmarks.db')
+conn = sqlite3.connect('benchmarks_new.db')
 c = conn.cursor()
 
 fig, ax = plt.subplots()
 fig.set_figwidth(6)
 fig.set_figheight(4)
 
-fig2, ax2 = plt.subplots()
-fig2.set_figwidth(6)
-fig2.set_figheight(4)
 
 
 ax.plot(np.arange(1,65), np.minimum( 7066, np.arange(1,65) / 8 * 860), "--", color="gray", label="memory bandwidth limit")
 ax.plot(np.arange(1,65), np.ones((64))*7066, ":", color="gray", label="FP execution limit")
 
 
-bests = []
-msizes = []
-nsizes = []
-rev = 4
-for MN in range(1, 65):
-    c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0}  and revision={1}".format(MN, rev))
-    results = list(c)
 
-    if len(results) > 0:
-        results.sort(key=lambda r: r[10])
-        bests.append((results[-1][2], results[-1][10]))
-        msizes.append((results[-1][3], results[-1][4]))
-        nsizes.append((results[-1][2], results[-1][3] * results[-1][4]))
+rev = 5
 
-        #sizes.append(
-        #    (results[-1][2], results[-1][3] * results[-1][4] / (results[-1][4] + results[-1][3])))
+for rev in [4, 5]:
+    bests = []
+    msizes = []
+    nsizes = []
+    for MN in range(1, 65):
+        c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0}  and revision={1}".format(MN, rev))
+        results = list(c)
 
-print(str(rev) + ": " + str(len(bests)))
-ax.plot(*zip(*bests), "o-", label="Tiles", markersize=3)
-ax2.plot(*zip(*msizes), "*", color="C" + str(rev))
-#ax2.plot(*zip(*msizes), "--*",color="C" +str(rev))
+        if len(results) > 0:
+            results.sort(key=lambda r: r[11])
+            bests.append((results[-1][2], results[-1][11]))
+            msizes.append((results[-1][3], results[-1][4]))
+            nsizes.append((results[-1][2], results[-1][3] * results[-1][4]))
 
-bests = []
-for MN in range(1, 65):
-    c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0} and TM=1 and TN=1 and revision={1}".format(MN, rev))
-    results = list(c)
 
-    if len(results) > 0:
-        results.sort(key=lambda r: r[10])
-        bests.append((results[-1][2], results[-1][10]))
+    print(str(rev) + ": " + str(len(bests)))
+    if(len(bests) > 0):
+        ax.plot(*zip(*bests), "o-", label="Tiles", markersize=3)
+    
 
-ax.plot(*zip(*bests), "o-", label="K,M,N", markersize=3)
+
 
 
 conn.close()
@@ -75,7 +64,7 @@ data_cutlas = np.asarray([
 ])
 
 
-ax.plot(data_cublas, "o-", label="CUBLAS", markersize=3)
+#ax.plot(data_cublas, "o-", label="CUBLAS", markersize=3)
 #ax.plot(data_cutlas, "o-", label="CUTLASS", markersize=3)
 
 
@@ -89,14 +78,8 @@ fig.savefig("best_perf_presentation.png", dpi=300, pad_inches=0.0, bbox_inches="
 
 
 
-ax2.plot(range(1, 32), 100 / np.arange(1,32))
 
-ax2.yaxis.grid(True)
-ax2.set_xlim((0, 24))
-ax2.set_ylim((0, 24))
-fig2.legend()
 #ax2.set_yticks([1] + list(range(5, 110, 5)))
 #ax2.set_xticks([1] + list(range(2, 64, 1)))
-fig2.savefig("best_perf_size_presentation.png", dpi=300, pad_inches=0.0, bbox_inches="tight")
 
 plt.show()
