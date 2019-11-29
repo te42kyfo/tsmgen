@@ -18,11 +18,9 @@ import sqlite3
 conn = sqlite3.connect('benchmarks_new.db')
 c = conn.cursor()
 
-revision = 4
+revision = 6
 
-reductionType = "none"
-
-for MN in range(34, 64, 1):
+for MN in range(1, 65, 1):
     print(MN)
     for TM in range(1, MN + 1):
         for TN in range(1, MN + 1):
@@ -30,11 +28,13 @@ for MN in range(34, 64, 1):
                 continue
 
             print("{:2} {:2}".format(TM, TN))
-            for reductionType in ["none"]:
+            for reductionType in ["localAtomic"]:
                 for leapFrog in [True, False]:
-                    for blockSize in [64, 128, 256, 384, 512]:
+                    for blockSize in [128, 256]:
                         unroll = 1
-                        if blockSize * (TM * TN) * 2 > 65536 or (TM * TN) * 2 > 255:
+                        if blockSize * (TM * TN + TM + TN +
+                                        (TM + TN if leapFrog else 0)) * 2 > 65536 or (TM * TN + TM +
+                                                                                      TN) * 2 > 255:
                             continue
                         print("{:5}".format(blockSize), end="   ")
                         kernel = Kernel(MN,
@@ -51,8 +51,8 @@ for MN in range(34, 64, 1):
                         clock, power, temp = 0, 0, 0
                         #clock, power, temp = measurePower(kernel, KK)
 
-                        print("{:5.2f} {:6.0f} {:6.0f} {:6.0f}Mhz {:6.0f}W {:6.0f}C".format(
-                            time, bw, flops, clock, power / 1000, temp))
+                        print("{:5.2f} {:6.0f} {:6.0f} ".format(time, bw, flops))
+
                         #c.execute(("SELECT * FROM tsmttsm WHERE "
                         #           "M={} AND N={} AND TN={} AND TM={} AND blockSize={} "
                         #           "AND reduction=\"{}\" and revision={}").format(
@@ -76,7 +76,7 @@ for MN in range(34, 64, 1):
                         query = ("INSERT INTO tsmttsm VALUES"
                                  "({}, {}, {}, {}, {},{},\"{}\",{},{},{},{},{}, {})").format(
                                      revision, MN, MN, TM, TN, blockSize, reductionType, unroll,
-                                     1 if leapFrog else 0, KK, time, flops, bw)
+                                     1 if leapFrog else 0, KK, time, bw, flops)
                         conn.execute(query)
                     conn.commit()
 
