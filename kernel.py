@@ -11,7 +11,18 @@ from pycuda.compiler import SourceModule
 
 
 class Kernel:
-    def __init__(self, M, N, TM, TN, blockSize, unroll=1, reduction="globalAtomic", leapFrog=False):
+    def __init__(self,
+                 M,
+                 N,
+                 TM,
+                 TN,
+                 blockSize,
+                 unroll=1,
+                 reduction="globalAtomic",
+                 leapFrog=False,
+                 singleAccumulator=False,
+                 truncatedIndex=False,
+                 noIndex=False):
         self.M = M
         self.N = N
         self.TM = TM
@@ -70,8 +81,9 @@ class Kernel:
         def generateLoad(name, array, dtype, X, TX, x, u, tileIdx, xthreads, idx):
             loadText = ""
             loadText += "{0} {1}_{2}_{3} = ".format(dtype, name, x, u)
-            ldgText = "__ldg( {0} + ({6}+ {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
-                array, x, X, xthreads, u, tileIdx, idx)
+            ldgText = "__ldg( {0} + ({6} {7} + {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
+                array, x, X, xthreads, u, tileIdx, idx if not noIndex else 0,
+                " / (1024*5000)" if truncatedIndex else "")
 
             if x == (X // xthreads) and X % xthreads != 0:
                 loadText += "  ( {} < {} ) ?  {} : 1.0;\n".format(tileIdx, X % xthreads, ldgText)
@@ -129,7 +141,9 @@ class Kernel:
             self.text += "\n"
             for m in range(0, TM):
                 for n in range(0, TN):
-                    self.text += "    tS{0}_{1} += vANow_{0}_{2} * vBNow_{1}_{2};\n".format(m, n, u)
+                    self.text += "    tS{3}_{4} += vANow_{0}_{2} * vBNow_{1}_{2};\n".format(
+                        m, n, u, m if not singleAccumulator else 0,
+                        n if not singleAccumulator else n % 2)
 
             if leapFrog:
                 for m in range(0, TM):
@@ -238,20 +252,16 @@ class Kernel:
         if self.blockSize * self.function.num_regs > pycuda.tools.DeviceData().registers:
             return
 
-        tb_per_mp = self.estimateBlockCount(self.function.num_regs)
+        tb_per_mp =  self.estimateBlockCount(self.function.num_regs)
 
         threadsPerSlice = math.ceil(self.M / self.TM) * math.ceil(self.N / self.TN)
 
         block = (self.blockSize, 1, 1)
-        grid = (int(
-            max(
-                min(
-                    max(self.multiprocessor_count * tb_per_mp * 0.3,
-                        (threadsPerSlice * K)**0.6 // self.blockSize),
-                    self.multiprocessor_count * tb_per_mp), minimumBlockCount)), )
+        grid = (self.multiprocessor_count * tb_per_mp,)
+
+        #grid = (80, )
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
     def estimateBlockCount(self, registers):
         return min(64 // (self.blockSize // 32), 65536 // (max(32, registers) * self.blockSize))
-
