@@ -1,4 +1,5 @@
 from kernel import Kernel
+from tsmmkernel import TSMMKernel
 import numpy as np
 import pycuda.driver as drv
 import termcolor as tc
@@ -32,6 +33,36 @@ def testKernel(kernel, K):
     print(str(K) + " ", end="", flush=True)
     return passed
 
+def testTSMMKernel(kernel, K):
+    # B = AC
+    A = np.around(np.random.randn(K, kernel.M).astype(np.float64))
+    B = np.around(np.random.randn(K, kernel.N).astype(np.float64))
+    C = np.around(np.random.randn(kernel.M, kernel.N).astype(np.float64))
+
+    A_gpu = drv.mem_alloc(A.nbytes)
+    B_gpu = drv.mem_alloc(B.nbytes)
+    C_gpu = drv.mem_alloc(C.nbytes)
+
+    drv.memcpy_htod(A_gpu, A)
+    drv.memcpy_htod(B_gpu, B)
+    drv.memcpy_htod(C_gpu, C)
+
+    kernel.run(A_gpu, B_gpu, C_gpu, K)
+
+    drv.memcpy_dtoh(B, B_gpu)
+
+    np_ref = np.matmul(A, C)
+    passed = True
+    if np.sum(np_ref - B) != 0:
+        print(tc.colored("  -- Verification Fail, wrong Results --", "red"))
+        print(K)
+        print(np_ref - B)
+        print(B)
+        passed = False
+    print(str(K) + " ", end="", flush=True)
+    return passed
+
+
 def testSeries(kernel):
     passed = True
     for i in range(0, 10):
@@ -41,14 +72,23 @@ def testSeries(kernel):
     return passed
 
 
-for m in range(5,32 ):
-    for n in range(5,32 ):
-        for tm in range(3, m+1):
-            for tn in range(3, n+1):
-                print(str(m) + " " + str(n) + " " + str(tm) + " " + str(tn) + ":  ")
-                kernel = Kernel(m, n, tm, tn, 256, reduction="localAtomic", leapFrog=False)
+def testTSMMSeries(kernel):
+    passed = True
+    for i in range(0, 10):
+        krange = 10**np.random.randint(1, 7)
+        passed &= testTSMMKernel(kernel,  np.random.randint(1, krange))
+    print()
+    return passed
 
 
-                if not testSeries(kernel):
-                    print(kernel.text)
-                    exit()
+for m in range(1,32):
+    for n in range(1,32):
+        for tn in range(1, n+1):
+            if tn > n/2 and n %tn != 0:
+                continue
+            print(str(m) + " " + str(n) + " "  + str(tn) + ":  ")
+            kernel = TSMMKernel(m, n, tn, 256)
+
+            if not testTSMMSeries(kernel):
+                print(kernel.text)
+                exit()
