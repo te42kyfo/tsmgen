@@ -19,6 +19,7 @@ class Kernel:
                  blockSize,
                  unroll=1,
                  reduction="globalAtomic",
+                 transposed=True,
                  leapFrog=False,
                  singleAccumulator=False,
                  truncatedIndex=False,
@@ -81,16 +82,28 @@ class Kernel:
         def generateLoad(name, array, dtype, X, TX, x, u, tileIdx, xthreads, idx):
             loadText = ""
             loadText += "{0} {1}_{2}_{3} = ".format(dtype, name, x, u)
-            ldgText = "__ldg( {0} + ({6} {7} + {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
-                array, x, X, xthreads, u, tileIdx, idx if not noIndex else 0,
-                " / (1024*5000)" if truncatedIndex else "")
 
-            if x == (X // xthreads) and X % xthreads != 0:
-                loadText += "  ( {} < {} ) ?  {} : 1.0;\n".format(tileIdx, X % xthreads, ldgText)
-            elif x > (X // xthreads) or (x == (X // xthreads) and X % xthreads == 0):
-                loadText += "  1.0;\n".format(tileIdx, X % TX, ldgText)
+            if not transposed:
+                ldgText = "__ldg( {0} + ({6} {7} +{4}*gridStride)*{2}  + {5}*{3} + {1})".format(
+                    array, x, X, TX, u, tileIdx, idx if not noIndex else 0, " / (1024*5000)" if truncatedIndex else "")
+                if x >= X % TX and X % TX != 0:
+                    loadText += "  ( {} < {} ) ?  {} : 0.0;\n".format(tileIdx, xthreads - 1, ldgText)
+                else:
+                    loadText += ldgText + ";\n"
             else:
-                loadText += ldgText + ";\n"
+                ldgText = "__ldg( {0} + ({6} {7} + {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
+                    array, x, X, xthreads, u, tileIdx, idx if not noIndex else 0,
+                    " / (1024*5000)" if truncatedIndex else "")
+                if x == (X // xthreads) and X % xthreads != 0:
+                    loadText += "  ( {} < {} ) ?  {} : 1.0;\n".format(tileIdx, X % xthreads, ldgText)
+                elif x > (X // xthreads) or (x == (X // xthreads) and X % xthreads == 0):
+                    loadText += "  1.0;\n".format(tileIdx, X % TX, ldgText)
+                else:
+                    loadText += ldgText + ";\n"
+            return loadText
+
+
+
 
             return loadText
 
@@ -173,16 +186,24 @@ class Kernel:
         for m in range(0, TM):
             for n in range(0, TN):
 
-                conditionals = []
-                if M - m * mthreads < 1:
-                    conditionals.append("false")
-                if N - n * nthreads < 1:
-                    conditionals.append("false")
 
-                if M - m * mthreads < mthreads:
-                    conditionals.append("{0} < " + str(M - m * mthreads))
-                if N - n * nthreads < nthreads:
-                    conditionals.append("{1} < " + str(N - n * nthreads))
+                conditionals = []
+                if not transposed:
+                    if m >= M % TM and M % TM != 0:
+                        conditionals.append("{0} < " + str(mthreads - 1))
+                    if n >= (N % TN) and N % TN != 0:
+                        conditionals.append("{1} < " + str(nthreads - 1))
+
+                else:
+                    if M - m * mthreads < 1:
+                        conditionals.append("false")
+                    if N - n * nthreads < 1:
+                        conditionals.append("false")
+
+                    if M - m * mthreads < mthreads:
+                        conditionals.append("{0} < " + str(M - m * mthreads))
+                    if N - n * nthreads < nthreads:
+                        conditionals.append("{1} < " + str(N - n * nthreads))
 
                 writeProtectText = ""
                 if len(conditionals) > 0:
@@ -235,7 +256,7 @@ class Kernel:
 
         return addresses
 
-    def run(self, A, B, C, K):
+    def run(self, A, B, C, K, blocksPerMP=-1):
 
         if self.multiprocessor_count is None:
             self.multiprocessor_count = drv.Context.get_device().get_attributes()[
@@ -257,9 +278,10 @@ class Kernel:
         threadsPerSlice = math.ceil(self.M / self.TM) * math.ceil(self.N / self.TN)
 
         block = (self.blockSize, 1, 1)
-        grid = (self.multiprocessor_count * tb_per_mp,)
-
-        #grid = (80, )
+        if blocksPerMP == -1:
+            grid = (self.multiprocessor_count * tb_per_mp,)
+        else:
+            grid = (80, )
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
