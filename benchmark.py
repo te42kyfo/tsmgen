@@ -4,7 +4,6 @@ import pycuda
 import sys
 from subprocess import run, PIPE
 
-
 nvmlInit()
 
 maxBufferElements = 512 * 1024 * 1024
@@ -15,7 +14,9 @@ C_gpu = drv.mem_alloc(128 * 128 * 8)
 
 
 def printSASS(code):
-    cubin = pycuda.compiler.compile(code, options=["-w", "-std=c++11"], arch="sm_70")
+    cubin = pycuda.compiler.compile(code,
+                                    options=["-w", "-std=c++11"],
+                                    arch="sm_70")
 
     run(["echo \"" + code + "\" >> temp.cubin"], stdout=PIPE, shell=True)
 
@@ -33,6 +34,7 @@ def printSASS(code):
     newFile.write(result.stdout)
     newFile.close()
 
+
 def measurePower(kernel, K):
     device = nvmlDeviceGetHandleByIndex(0)
     start = drv.Event()
@@ -45,17 +47,15 @@ def measurePower(kernel, K):
     clock = nvmlDeviceGetClockInfo(device, NVML_CLOCK_SM)
     power = nvmlDeviceGetPowerUsage(device)
 
-
     end.record()
     end.synchronize()
     return (clock, power, temp)
 
 
+def benchKernel(kernel, K, iters=10, blocksPerMP=-1):
 
+    kernel.run(A_gpu, B_gpu, C_gpu, K, blocksPerMP)
 
-def benchKernel(kernel, K, iters=10):
-
-    kernel.run(A_gpu, B_gpu, C_gpu, K)
     #if kernel.function.num_regs == 255:
     #    return (1, 1, 1)
 
@@ -64,7 +64,7 @@ def benchKernel(kernel, K, iters=10):
         end = drv.Event()
 
         start.record()
-        kernel.run(A_gpu, B_gpu, C_gpu, K)
+        kernel.run(A_gpu, B_gpu, C_gpu, K, blocksPerMP)
 
         end.record()
         end.synchronize()
@@ -77,6 +77,5 @@ def benchKernel(kernel, K, iters=10):
 
     bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
     flops = kernel.M * K * kernel.N * 2 / dt / 10**6
-
 
     return (dt, flops, bw)
