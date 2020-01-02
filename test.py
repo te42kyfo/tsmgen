@@ -82,12 +82,12 @@ def testTSMMSeries(kernel):
 
 
 for m in range(1,32):
-    for n in range(1,32):
+    for n in range(m,m+1):
         for tn in range(1, n+1):
             if tn > n/2 and n %tn != 0:
                 continue
             print(str(m) + " " + str(n) + " "  + str(tn) + ":  ")
-            kernel = TSMMKernel(m, n, tn, 256)
+            kernel = TSMMKernel(m, n, tn, 256, 4)
 
             if not testTSMMSeries(kernel):
                 print(kernel.text)

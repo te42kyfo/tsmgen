@@ -26,13 +26,13 @@ for MN in range(1, 64, 1):
         if TN > MN / 2 and MN % TN != 0:
             continue
         print("{:2}".format(TN))
-        for blockSize in [128, 256, 512]:
-            unroll = 1
-            print("{:5}".format(blockSize), end="   ")
-            kernel = TSMMKernel(MN, MN, TN, blockSize)
-            KK = maxBufferElements // min(kernel.M, kernel.N)
+        for unroll in [1, 2, 4]:
+            for blockSize in [128, 256, 512]:
+                print(" {:2}x   {:5}".format(unroll, blockSize), end="   ")
+                kernel = TSMMKernel(MN, MN, TN, blockSize, 4)
+                KK = maxBufferElements // min(kernel.M, kernel.N)
 
-            time, flops, bw = benchKernel(kernel, KK, 10)
-            clock, power, temp = 0, 0, 0
+                time, flops, bw = benchKernel(kernel, KK, 10)
+                clock, power, temp = 0, 0, 0
 
-            print("{:5.2f} {:6.0f} {:6.0f} ".format(time, bw, flops))
+                print("{:5.2f} {:6.0f} {:6.0f} ".format(time, bw, flops))
