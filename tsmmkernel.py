@@ -12,7 +12,7 @@ from pycuda.compiler import SourceModule
 
 class TSMMKernel:
 
-    def __init__(self, M, N, TN, blockSize, unroll=1):
+    def __init__(self, M, N, TN, blockSize, unroll=1, CVALS=False, CSHARED=False):
         self.M = M
         self.N = N
         self.TN = TN
@@ -32,8 +32,26 @@ class TSMMKernel:
         self.text += "  int tidx = threadIdx.x + blockIdx.x*blockDim.x;\n"
         self.text += "  const int sliceId = tidx / {};\n".format(nthreads)
         self.text += "  const int nidx = tidx % {};\n".format(nthreads)
-        self.text += "  const int gridStride = (gridDim.x*{})/{};\n\n".format(
+        self.text += "  const int64_t gridStride = (gridDim.x*{})/{};\n\n".format(
             blockSize, nthreads, unroll)
+
+        # Load Cvals into shared memory
+        if CSHARED:
+            self.text += "  {} __volatile__ __shared__ cshared[{}];\n".format(
+                dtype, M * N)
+            self.text += "  for(int mn = 0; mn < {}; mn+={}){{\n".format(M * N, blockSize)
+            self.text += "    if (mn+threadIdx.x < {})\n".format(M * N)
+            self.text += "      cshared[mn+threadIdx.x] = C[mn+threadIdx.x];\n"
+            self.text += "  }\n"
+            self.text += "  __syncthreads();\n\n"
+
+        # Load Cvals into registers
+        if CVALS:
+            for tn in range(0, TN):
+                for m in range(0, M):
+                    self.text += "  {0} cval{1}_{2} = C[{2}*{3} + {1}*{4} + nidx];\n".format(
+                        dtype, tn, m, N, nthreads)
+            self.text += "\n"
 
         # iteration loop
         self.text += "  int64_t idx;\n"
@@ -50,50 +68,61 @@ class TSMMKernel:
                 self.text += "ts{}_{} = 0".format(n, u)
         self.text += ";\n\n"
 
-        for tn in range(0, TN):
-            for m in range(0, M):
+        for m in range(0, M):
+            for tn in range(0, TN):
+                if (tn + 1) * nthreads > N:
+                    self.text += "    if( nidx < {} ){{\n  ".format(N - tn * nthreads)
+                if not CVALS:
+                    self.text += "    {0} cval{1}_{2} = ".format(dtype, tn, m)
+                    if CSHARED:
+                        self.text += "cshared[{1} * {2} + {0} * {3} + nidx];\n".format(
+                            tn, m, N, nthreads)
+                    else:
+                        self.text += "C[{1} * {2} + {0} * {3} + nidx];\n".format(
+                            tn, m, N, nthreads)
                 for u in range(0, unroll):
-                    if (tn + 1) * nthreads > N:
-                        self.text += "    if( nidx < {} )\n  ".format(N - tn * nthreads)
-
-                    self.text += "    ts{0}_{5} += A[(idx+{5}*gridStride)*{1} + {2}] * C[{2}*{3} + {0}*{4} + nidx];\n".format(
-                        tn, M, m, N, nthreads, u)
+                    self.text += "    ts{0}_{3} += A[(idx+{3}*gridStride)*{1} + {2}] * cval{0}_{2};\n".format(
+                        tn, M, m, u)
+                if (tn + 1) * nthreads > N:
+                    self.text += "    }\n"
 
         for n in range(0, TN):
             for u in range(0, unroll):
                 if (n + 1) * nthreads > N:
                     self.text += "    if( nidx < {} )\n  ".format(N - n * nthreads)
+                #self.text += "    if( ts0_0 > 123123 )\n  ".format(N - tn * nthreads)
                 self.text += "    B[(idx+{3}*gridStride)*{0} +  {1}*{2} + nidx] = ts{1}_{3};\n".format(
                     N, n, nthreads, u)
 
         self.text += "  } \n"
 
         # remainder iteration loop
-        self.text += "  for(; idx < K; idx += gridStride){\n"
-        self.text += "    {} ".format(dtype)
-        first = True
-        for n in range(0, TN):
-            if not first:
-                self.text += ", "
-            first = False
-            self.text += "ts{}_{} = 0".format(n, u)
-        self.text += ";\n\n"
+        if unroll > 1:
+            self.text += "  for(; idx < K; idx += gridStride){\n"
+            self.text += "    {} ".format(dtype)
+            first = True
+            for n in range(0, TN):
+                if not first:
+                    self.text += ", "
+                first = False
+                self.text += "ts{}_{} = 0".format(n, u)
+            self.text += ";\n\n"
 
-        for tn in range(0, TN):
-            for m in range(0, M):
-                if (tn + 1) * nthreads > N:
-                    self.text += "    if( nidx < {} )\n  ".format(N - tn * nthreads)
+            for tn in range(0, TN):
+                for m in range(0, M):
+                    if (tn + 1) * nthreads > N:
+                        self.text += "    if( nidx < {} )\n  ".format(N - tn * nthreads)
+                    self.text += "    ts{0}_{5} += A[(idx)*{1} + {2}] * C[{2}*{3} + {0}*{4} + nidx];\n".format(
+                        tn, M, m, N, nthreads, u)
 
-                self.text += "    ts{0}_{5} += A[(idx)*{1} + {2}] * C[{2}*{3} + {0}*{4} + nidx];\n".format(
-                    tn, M, m, N, nthreads, u)
+            for n in range(0, TN):
+                if (n + 1) * nthreads > N:
+                    self.text += "    if( nidx < {} )\n  ".format(N - n * nthreads)
 
-        for n in range(0, TN):
-            if (n + 1) * nthreads > N:
-                self.text += "    if( nidx < {} )\n  ".format(N - n * nthreads)
-            self.text += "    B[(idx)*{0} +  {1}*{2} + nidx] = ts{1}_{3};\n".format(
-                N, n, nthreads, u)
+                self.text += "    B[(idx)*{0} +  {1}*{2} + nidx] = ts{1}_{3};\n".format(
+                    N, n, nthreads, u)
 
-        self.text += "  } \n"
+            self.text += "  } \n"
         self.text += "} \n\n"
 
     def run(self, A, B, C, K, blocksPerMP=-1):
