@@ -4,6 +4,7 @@ import numpy as np
 import pycuda.driver as drv
 import termcolor as tc
 
+
 def testKernel(kernel, K):
 
     A = np.around(np.random.randn(K, kernel.M).astype(np.float64))
@@ -33,6 +34,7 @@ def testKernel(kernel, K):
     print(str(K) + " ", end="", flush=True)
     return passed
 
+
 def testTSMMKernel(kernel, K):
     # B = AC
     A = np.around(np.random.randn(K, kernel.M).astype(np.float64))
@@ -53,11 +55,29 @@ def testTSMMKernel(kernel, K):
 
     np_ref = np.matmul(A, C)
     passed = True
+    np.set_printoptions(precision=0, threshold=False)
     if np.sum(np_ref - B) != 0:
         print(tc.colored("  -- Verification Fail, wrong Results --", "red"))
         print(K)
-        print(np_ref - B)
-        print(B)
+        print("Difference:")
+        diff = np_ref - B
+        linesPrinted = 0
+        for y in range(0, diff.shape[0]):
+            for x in range(0, diff.shape[1]):
+                if diff[y,x] != 0:
+                    linesPrinted += 1
+                    if linesPrinted < 200:
+                        print(str(y), end=":  ")
+                        for x in range(0, diff.shape[1]):
+                            print(diff[y,x], end="  ")
+                        print(" ------ ", end="")
+                        for x in range(0, diff.shape[1]):
+                            print(B[y,x], end="  ")
+                        print("")
+                    break
+
+        print("Lines wrong: " + str(linesPrinted))
+        print(B[:100,:])
         passed = False
     print(str(K) + " ", end="", flush=True)
     return passed
@@ -66,7 +86,7 @@ def testTSMMKernel(kernel, K):
 def testSeries(kernel):
     passed = True
     for i in range(0, 10):
-        krange = 10**np.random.randint(1, 7)
+        krange = 10**np.random.randint(8, 9)
         passed &= testKernel(kernel, np.random.randint(1, krange))
     print()
     return passed
@@ -75,20 +95,28 @@ def testSeries(kernel):
 def testTSMMSeries(kernel):
     passed = True
     for i in range(0, 10):
-        krange = 10**np.random.randint(1, 7)
-        passed &= testTSMMKernel(kernel,  np.random.randint(1, krange))
+        krange = 10**np.random.randint(1, 8)
+        passed &= testTSMMKernel(kernel, np.random.randint(1, krange))
     print()
     return passed
 
 
-for m in range(1,32):
-    for n in range(m,m+1):
-        for tn in range(1, n+1):
-            if tn > n/2 and n %tn != 0:
-                continue
-            print(str(m) + " " + str(n) + " "  + str(tn) + ":  ")
-            kernel = TSMMKernel(m, n, tn, 256, 4)
+for m in range(1, 32):
+    for n in range(m, m + 1):
+        for tn in range(1, 4):
+            for u in [1, 2, 3, 4]:
+                if tn > n / 2 and n % tn != 0:
+                    continue
+                print(str(m) + " " + str(n) + " " + str(tn) + " " + str(u) + "x :  ")
+                kernel = TSMMKernel(n,
+                                    n,
+                                    tn,
+                                    128,
+                                    u,
+                                    CVALS=False,
+                                    CSHARED=True,
+                                    WRITECOMBINE=False)
 
-            if not testTSMMSeries(kernel):
-                print(kernel.text)
-                exit()
+                if not testTSMMSeries(kernel):
+                    print(kernel.text)
+                    exit()
