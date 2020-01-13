@@ -20,16 +20,16 @@ c = conn.cursor()
 
 revision = 5
 
-for MN in range(32, 65, 1):
+for MN in range(1, 65, 1):
     print("MN={}".format(MN))
-    for TN in range(1, 4):
+    for TN in range(1, 6):
         if TN > MN / 2 and MN % TN != 0:
             continue
         print(" TN={:2}".format(TN))
-        for unroll in [1, 2, 3, 4]:
-            for blockSize in [128, 256, 512]:
+        for unroll in [1, 2, 3, 4, 5]:
+            for blockSize in [128, 256, 512, 1024]:
                 print(" {:2}x   {:5}".format(unroll, blockSize), end="   ")
-                kernel = TSMMKernel(MN, MN, TN, blockSize, unroll, CVALS=True, CSHARED=False)
+                kernel = TSMMKernel(MN, MN, TN, blockSize, unroll, CSHARED=True)
                 KK = maxBufferElements // min(kernel.M, kernel.N)
 
                 time, flops, bw = benchKernel(kernel, KK, 10)
