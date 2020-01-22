@@ -18,18 +18,25 @@ import sqlite3
 conn = sqlite3.connect('benchmarks_new.db')
 c = conn.cursor()
 
-revision = 5
+revision = 6
 
 for MN in range(1, 65, 1):
     print("MN={}".format(MN))
-    for TN in range(1, 6):
-        if TN > MN / 2 and MN % TN != 0:
+    for TN in [MN, 1, 2, 4, 8, 16, 32]:
+        if TN > MN or MN / TN > 16:
             continue
         print(" TN={:2}".format(TN))
         for unroll in [1, 2, 3, 4, 5]:
             for blockSize in [128, 256, 512, 1024]:
                 print(" {:2}x   {:5}".format(unroll, blockSize), end="   ")
-                kernel = TSMMKernel(MN, MN, TN, blockSize, unroll, CSHARED=True)
+                kernel = TSMMKernel(MN,
+                                    MN,
+                                    TN,
+                                    blockSize,
+                                    unroll,
+                                    CSHARED=True,
+                                    USETHREADCOUNT=True,
+                                    nthreads=TN)
                 KK = maxBufferElements // min(kernel.M, kernel.N)
 
                 time, flops, bw = benchKernel(kernel, KK, 10)

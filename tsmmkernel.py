@@ -12,7 +12,16 @@ from pycuda.compiler import SourceModule
 
 class TSMMKernel:
 
-    def __init__(self, M, N, TN, blockSize, unroll=1, CVALS=False, CSHARED=False):
+    def __init__(self,
+                 M,
+                 N,
+                 TN,
+                 blockSize,
+                 unroll=1,
+                 CVALS=False,
+                 CSHARED=False,
+                 USETHREADCOUNT=False,
+                 nthreads=0):
         self.M = M
         self.N = N
         self.TN = TN
@@ -22,10 +31,14 @@ class TSMMKernel:
         self.mod = None
         self.multiprocessor_count = None
         self.function = None
+        self.dtype = dtype
 
         dtype = "double"
 
-        nthreads = (N - 1) // TN + 1
+        if USETHREADCOUNT:
+            TN = (N - 1) // nthreads + 1
+        else:
+            nthreads = (N - 1) // TN + 1
 
         self.text = "void __global__ __launch_bounds__({2}) {0} ({1}* A, {1}* B, {1}* C, int64_t K) {{\n".format(
             self.name, dtype, self.blockSize)
@@ -131,7 +144,10 @@ class TSMMKernel:
             self.multiprocessor_count = drv.Context.get_device().get_attributes()[
                 drv.device_attribute.MULTIPROCESSOR_COUNT]
         if self.mod is None:
-            self.mod = SourceModule(self.text, arch="sm_70", options=["-lineinfo"])
+            self.mod = SourceModule(self.text,
+                                    arch="sm_70",
+                                    options=["-lineinfo"],
+                                    no_extern_c=1)
         if self.function is None:
             self.function = self.mod.get_function(self.name)
             self.function.prepare(('P', 'P', 'P', numpy.int64))
@@ -148,6 +164,7 @@ class TSMMKernel:
             grid = (self.multiprocessor_count * tb_per_mp,)
         else:
             grid = (80,)
+        #self.function.set_cache_config(drv.shared_config.PREFER_EQUAL)
 
         self.function.prepared_call(grid, block, A, B, C, numpy.int64(K))
 
