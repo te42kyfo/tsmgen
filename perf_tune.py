@@ -20,12 +20,13 @@ c = conn.cursor()
 
 revision = 6
 
-for MN in range(37, 65, 1):
+datatype = "Z"
+
+for MN in range(56, 65, 1):
     print(MN)
     for TM in range(1, MN + 1):
         for TN in range(1, MN + 1):
-            if (MN % TM != 0 and TM * 2 > MN + 1) or (MN % TN != 0
-                                                      and TN * 2 > MN + 1):
+            if (MN % TM != 0 and TM * 2 > MN + 1) or (MN % TN != 0 and TN * 2 > MN + 1):
                 continue
 
             print("{:2} {:2}".format(TM, TN))
@@ -34,11 +35,12 @@ for MN in range(37, 65, 1):
                     for leapFrog in [True, False]:
                         for blockSize in [128, 256]:
                             unroll = 1
-                            if blockSize * (TM * TN + TM + TN +
-                                            (TM + TN if leapFrog else 0)
-                                            ) * 2 > 65536 or (TM * TN + TM +
-                                                              TN) * 2 > 255:
+                            regPerThread = (TM * TN + (TM + TN) *
+                                            (2 if leapFrog else 1)) * (
+                                                2 if datatype == "D" else 4)
+                            if blockSize * regPerThread > 65536 or regPerThread > 255:
                                 continue
+
                             print("{:5}".format(blockSize), end="   ")
                             kernel = Kernel(MN,
                                             MN,
@@ -48,33 +50,36 @@ for MN in range(37, 65, 1):
                                             reduction=reductionType,
                                             unroll=unroll,
                                             leapFrog=leapFrog,
-                                            transposed=transposed)
-                            KK = maxBufferElements // min(kernel.M, kernel.N)
+                                            transposed=transposed,
+                                            dtype="cuDoubleComplex")
+
+                            KK = maxBufferElements // min(
+                                kernel.M, kernel.N) // (1 if datatype == "D" else 2)
 
                             time, flops, bw = benchKernel(kernel, KK, 10)
                             clock, power, temp = 0, 0, 0
                             #clock, power, temp = measurePower(kernel, KK)
 
-                            print("{:5.2f} {:6.0f} {:6.0f} ".format(
-                                time, bw, flops))
+                            print("{:5.2f} {:6.0f} {:6.0f} ".format(time, bw, flops))
 
                             query = (
                                 "DELETE FROM tsmttsm WHERE "
                                 "M={} AND N={} AND TM={} AND TN={} AND blockSize={} "
                                 "AND reduction=\"{}\" AND revision={} AND unroll={} "
-                                "AND leapfrog={} AND transposed={}").format(
-                                    MN, MN, TM, TN, blockSize, reductionType,
-                                    revision, unroll, 1 if leapFrog else 0,
-                                    1 if transposed else 0)
+                                "AND leapfrog={} AND transposed={} and datatype=\"{}\""
+                            ).format(MN, MN, TM, TN, blockSize, reductionType, revision,
+                                     unroll, 1 if leapFrog else 0, 1 if transposed else 0,
+                                     datatype)
 
                             conn.execute(query)
                             query = (
-                                "INSERT INTO tsmttsm VALUES"
-                                "({}, {}, {}, {}, {},{},\"{}\",{},{}, {} ,{},{},{}, {})"
-                            ).format(revision, MN, MN, TM, TN, blockSize,
-                                     reductionType, unroll,
-                                     1 if leapFrog else 0,
+                                "INSERT INTO tsmttsm"
+                                "(revision, datatype, M, N, TM, TN, blockSize, reduction, unroll, leapFrog, transposed, K, time, bw, flops)"
+                                "VALUES ({},\"{}\",{},{},{},{},{},\"{}\",{},{},{},{},{},{},{})"
+                            ).format(revision, datatype, MN, MN, TM, TN, blockSize,
+                                     reductionType, unroll, 1 if leapFrog else 0,
                                      1 if transposed else 0, KK, time, bw, flops)
+
                             conn.execute(query)
             conn.commit()
 

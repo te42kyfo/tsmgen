@@ -7,9 +7,19 @@ import termcolor as tc
 
 def testKernel(kernel, K):
 
-    A = np.around(np.random.randn(K, kernel.M).astype(np.float64))
-    B = np.around(np.random.randn(K, kernel.N).astype(np.float64))
-    C = np.zeros((kernel.M, kernel.N), dtype=np.float64)
+    if kernel.dtype == "cuDoubleComplex":
+        A = np.around(
+            np.random.randn(K, kernel.M * 2).astype(np.float64).view(np.complex128))
+        B = np.around(
+            np.random.randn(K, kernel.N * 2).astype(np.float64).view(np.complex128))
+        C = np.zeros((kernel.M, kernel.N), dtype=np.complex128)
+    else:
+        A = np.around(np.random.randn(K, kernel.M).astype(np.float64))
+        B = np.around(np.random.randn(K, kernel.N).astype(np.float64))
+        C = np.zeros((kernel.M, kernel.N), dtype=np.float64)
+
+    #A = np.ones((K, kernel.M), dtype=np.complex128)
+    #B = np.ones((K, kernel.N), dtype=np.complex128)
 
     A_gpu = drv.mem_alloc(A.nbytes)
     B_gpu = drv.mem_alloc(B.nbytes)
@@ -28,7 +38,9 @@ def testKernel(kernel, K):
     if np.sum(np_ref - C) != 0:
         print(tc.colored("  -- Verification Fail, wrong Results --", "red"))
         print(K)
+        print("Difference")
         print(np_ref - C)
+        print("solution")
         print(C)
         passed = False
     print(str(K) + " ", end="", flush=True)
@@ -64,20 +76,20 @@ def testTSMMKernel(kernel, K):
         linesPrinted = 0
         for y in range(0, diff.shape[0]):
             for x in range(0, diff.shape[1]):
-                if diff[y,x] != 0:
+                if diff[y, x] != 0:
                     linesPrinted += 1
                     if linesPrinted < 200:
                         print(str(y), end=":  ")
                         for x in range(0, diff.shape[1]):
-                            print(diff[y,x], end="  ")
+                            print(diff[y, x], end="  ")
                         print(" ------ ", end="")
                         for x in range(0, diff.shape[1]):
-                            print(B[y,x], end="  ")
+                            print(B[y, x], end="  ")
                         print("")
                     break
 
         print("Lines wrong: " + str(linesPrinted))
-        print(B[:100,:])
+        print(B[:100, :])
         passed = False
     print(str(K) + " ", end="", flush=True)
     return passed
@@ -85,9 +97,9 @@ def testTSMMKernel(kernel, K):
 
 def testSeries(kernel):
     passed = True
-    for i in range(0, 10):
-        krange = 10**np.random.randint(8, 9)
-        passed &= testKernel(kernel, np.random.randint(1, krange))
+    for i in range(0, 5):
+        krange = 10**np.random.randint(1, 7)
+        passed &= testKernel(kernel, 10000)#np.random.randint(1, krange))
     print()
     return passed
 
@@ -101,22 +113,39 @@ def testTSMMSeries(kernel):
     return passed
 
 
-for m in range(1, 32):
-    for n in range(m, m + 1):
-        for tn in range(1, 4):
-            for u in [1, 2, 3, 4]:
-                if tn > n / 2 and n % tn != 0:
-                    continue
-                print(str(m) + " " + str(n) + " " + str(tn) + " " + str(u) + "x :  ")
-                kernel = TSMMKernel(n,
-                                    n,
-                                    tn,
-                                    128,
-                                    u,
-                                    CVALS=False,
-                                    CSHARED=True,
-                                    WRITECOMBINE=False)
+for MN in range(45, 65):
+    for TM in range(14, MN):
+        for TN in range(3, 5):
+            for reduction in ["globalAtomic", "localAtomic"]:
+                for transposed in [False, True]:
+                    for leapFrog in [False, True]:
+                        for dtype in ["double", "cuDoubleComplex"]:
+                            for blockSize in [128, 256]:
+                                if blockSize * (TM * TN + TM + TN +
+                                                (TM + TN if leapFrog else 0)) * (
+                                                    2 if dtype == "double" else 4
+                                                ) > 65536 or (TM * TN + TM + TN) * (
+                                                    2 if dtype == "double" else 4) > 255:
+                                    continue
+                                if (MN % TM != 0 and
+                                        TM * 2 > MN + 1) or (MN % TN != 0 and
+                                                             TN * 2 > MN + 1):
+                                    continue
+                                print(
+                                    str(MN) + " " + str(MN) + " " + str(TM) + " " +
+                                    str(TN) + " " + reduction + " " + str(transposed) +
+                                    " " + str(leapFrog) + " " + dtype + " " +
+                                    str(blockSize) + " :  ")
+                                kernel = Kernel(MN,
+                                                MN,
+                                                TM,
+                                                TN,
+                                                blockSize,
+                                                reduction=reduction,
+                                                dtype=dtype,
+                                                transposed=transposed,
+                                                leapFrog=leapFrog)
 
-                if not testTSMMSeries(kernel):
-                    print(kernel.text)
-                    exit()
+                                if not testSeries(kernel):
+                                    print(kernel.text)
+                                    exit()
