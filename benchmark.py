@@ -10,13 +10,11 @@ maxBufferElements = 512 * 1024 * 1024
 
 A_gpu = drv.mem_alloc(maxBufferElements * 8)
 B_gpu = drv.mem_alloc(maxBufferElements * 8)
-C_gpu = drv.mem_alloc(128 * 128 * 8)
+C_gpu = drv.mem_alloc(128 * 128 * 8 * 2)
 
 
 def printSASS(code):
-    cubin = pycuda.compiler.compile(code,
-                                    options=["-w", "-std=c++11"],
-                                    arch="sm_70")
+    cubin = pycuda.compiler.compile(code, options=["-w", "-std=c++11"], arch="sm_70")
 
     run(["echo \"" + code + "\" >> temp.cubin"], stdout=PIPE, shell=True)
 
@@ -75,7 +73,9 @@ def benchKernel(kernel, K, iters=10, blocksPerMP=-1):
     dts.sort()
     dt = dts[1 if len(dts) > 2 else 0]
 
-    bw = (kernel.M * K + kernel.N * K) * 8 / dt / 10**6
-    flops = kernel.M * K * kernel.N * 2 / dt / 10**6
+    bw = (kernel.M * K +
+          kernel.N * K) * (2 if kernel.dtype == "cuDoubleComplex" else 1) * 8 / dt / 10**6
+    flops = kernel.M * K * kernel.N * (8 if kernel.dtype == "cuDoubleComplex" else
+                                       2) / dt / 10**6
 
     return (dt, flops, bw)
