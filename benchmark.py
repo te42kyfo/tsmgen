@@ -52,7 +52,9 @@ def measurePower(kernel, K):
 
 def benchKernel(kernel, K, iters=10, blocksPerMP=-1):
 
+
     kernel.run(A_gpu, B_gpu, C_gpu, K, blocksPerMP)
+
 
     #if kernel.function.num_regs == 255:
     #    return (1, 1, 1)
@@ -67,6 +69,9 @@ def benchKernel(kernel, K, iters=10, blocksPerMP=-1):
         end.record()
         end.synchronize()
         return end.time_since(start)
+
+    if timeKernel() > 1000:
+        return
 
     dts = [timeKernel() for i in range(0, iters)]
 

@@ -93,7 +93,7 @@ class Kernel:
         else:
             self.text += "__device__ inline  double VALUE(double v) {  return v;}\n\n"
 
-        self.text += "void __global__ __launch_bounds__({2}) {0} ({1}* A, {1}* B, {1}* C, int64_t K) {{\n".format(
+        self.text += "void __global__ __launch_bounds__({2}, 2) {0} ({1}* A, {1}* B, {1}* C, int64_t K) {{\n".format(
             self.name, dtype, self.blockSize)
         self.text += "  int tidx = threadIdx.x + blockIdx.x*blockDim.x;\n"
         self.text += "  int sliceId = tidx / {};\n".format(threadsPerSlice)
@@ -133,18 +133,18 @@ class Kernel:
             loadText += "{0} {1}_{2}_{3} = ".format(dtype, name, x, u)
 
             if not transposed:
-                ldgText = "__ldg( {0} + ({6} {7} +{4}*gridStride)*{2}  + {5}*{3} + {1})".format(
+                ldgText = "__ldg( {0} + (({6}) {7} +{4}*gridStride)*{2}  + {5}*{3} + {1})".format(
                     array, x, X, TX, u, tileIdx, idx if not noIndex else 0,
-                    " / (1024*5000)" if truncatedIndex else "")
+                    " / (1024*1024)" if truncatedIndex else "")
                 if x >= X % TX and X % TX != 0:
                     loadText += "  ( {} < {} ) ?  {} : VALUE(0.0);\n".format(
                         tileIdx, xthreads - 1, ldgText)
                 else:
                     loadText += ldgText + ";\n"
             else:
-                ldgText = "__ldg( {0} + ({6} {7} + {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
+                ldgText = "__ldg( {0} + (({6}) {7} + {4}*gridStride)*{2}  + {1}*{3} + {5})".format(
                     array, x, X, xthreads, u, tileIdx, idx if not noIndex else 0,
-                    " / (1024*5000)" if truncatedIndex else "")
+                    " / (1024*1024)" if truncatedIndex else "")
                 if x == (X // xthreads) and X % xthreads != 0:
                     loadText += "  ( {} < {} ) ?  {} : VALUE(1.0);\n".format(
                         tileIdx, X % xthreads, ldgText)
@@ -335,7 +335,7 @@ class Kernel:
         if blocksPerMP == -1:
             grid = (self.multiprocessor_count * tb_per_mp,)
         else:
-            grid = (80,)
+            grid = (80*blocksPerMP,)
 
 
         #self.function.set_cache_config(drv.shared_config.PREFER_EQUAL)

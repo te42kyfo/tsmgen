@@ -114,8 +114,8 @@ def testTSMMSeries(kernel):
 
 
 for MN in range(45, 65):
-    for TM in range(14, MN):
-        for TN in range(3, 5):
+    for TM in range(1, MN):
+        for TN in range(1, 5):
             for reduction in ["globalAtomic", "localAtomic"]:
                 for transposed in [False, True]:
                     for leapFrog in [False, True]:
