@@ -14,7 +14,7 @@ C_gpu = drv.mem_alloc(128 * 128 * 8 * 2)
 
 
 def printSASS(code):
-    cubin = pycuda.compiler.compile(code, options=["-w", "-std=c++11"], arch="sm_70")
+    cubin = pycuda.compiler.compile(code, options=["-w", "-std=c++11"])
 
     run(["echo \"" + code + "\" >> temp.cubin"], stdout=PIPE, shell=True)
 

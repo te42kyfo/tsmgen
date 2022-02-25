@@ -4,7 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import sqlite3
 
-conn = sqlite3.connect('benchmarks_new.db')
+conn = sqlite3.connect('benchmarks_new3.db')
 c = conn.cursor()
 
 fig, ax = plt.subplots()
@@ -25,22 +25,23 @@ ax.plot(np.arange(1, 65),
 
 rev = 5
 
-for rev in [4, 5]:
+for rev in [4, 5, 6]:
     bests = []
     msizes = []
     nsizes = []
     for MN in range(1, 65):
-        c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0}  and revision={1}".format(
+        c.execute("SELECT * from tsmttsm WHERE M={0} AND N={0} and datatype=\"D\" and revision={1}".format(
             MN, rev))
         results = list(c)
 
         if len(results) > 0:
-            results.sort(key=lambda r: r[11])
-            bests.append((results[-1][2], results[-1][11]))
+            results.sort(key=lambda r: r[14])
+            bests.append((results[-1][2], results[-1][14]))
             msizes.append((results[-1][3], results[-1][4]))
             nsizes.append((results[-1][2], results[-1][3] * results[-1][4]))
 
     print(str(rev) + ": " + str(len(bests)))
+    print(bests)
     if (len(bests) > 0):
         ax.plot(*zip(*bests), "o-", label="Tiles", markersize=3)
 

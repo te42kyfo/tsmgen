@@ -15,12 +15,12 @@ matplotlib.use("SVG")
 import matplotlib.pyplot as plt
 import sqlite3
 
-conn = sqlite3.connect('benchmarks_new3.db')
+conn = sqlite3.connect('benchmarks.db')
 c = conn.cursor()
 
 revision = 7
 
-for MN in range(60, 65, 1):
+for MN in range(1, 65, 1):
     print("MN={}".format(MN))
     for dtype in ["double", "cuDoubleComplex"]:
 
@@ -58,14 +58,14 @@ for MN in range(60, 65, 1):
 
                         KK = maxBufferElements // min(kernel.M, kernel.N) / 2
 
-                        try:
-                            time, flops, bw = benchKernel(kernel, KK, 10)
+                        #try:
+                        time, flops, bw = benchKernel(kernel, KK, 10)
 
-                        except (KeyboardInterrupt, SystemExit):
-                            raise
-                        except:
-                            print()
-                            continue
+                        #except (KeyboardInterrupt, SystemExit):
+                        #    raise
+                        #except:
+                        #    print()
+                        #    continue
                         clock, power, temp = 0, 0, 0
 
                         print("{:5.2f} {:6.0f} {:6.0f} ".format(time, bw, flops))

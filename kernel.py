@@ -316,7 +316,7 @@ class Kernel:
             self.multiprocessor_count = drv.Context.get_device().get_attributes()[
                 drv.device_attribute.MULTIPROCESSOR_COUNT]
         if self.mod is None:
-            self.mod = SourceModule(self.text, arch="sm_70", options=["-lineinfo"])
+            self.mod = SourceModule(self.text,  options=["-lineinfo"])
         if self.function is None:
             self.function = self.mod.get_function(self.name)
             self.function.prepare(('P', 'P', 'P', numpy.int64))

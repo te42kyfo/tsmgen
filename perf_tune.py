@@ -15,18 +15,18 @@ matplotlib.use("SVG")
 import matplotlib.pyplot as plt
 import sqlite3
 
-conn = sqlite3.connect('benchmarks_new3.db')
+conn = sqlite3.connect('benchmarks.db')
 c = conn.cursor()
 
 revision = 6
 
 datatype = "Z"
 
-for MN in range(64, 65, 1):
+for MN in range(1, 65, 1):
     print(MN)
     for datatype in ["D", "Z"]:
         print(datatype)
-        for TM in range(6, MN + 1):
+        for TM in range(1, MN + 1):
             for TN in range(1, MN + 1):
                 if (MN % TM != 0 and TM * 2 > MN + 1) or (MN % TN != 0 and
                                                           TN * 2 > MN + 1):
@@ -38,11 +38,11 @@ for MN in range(64, 65, 1):
                         for leapFrog in [True, False]:
                             for blockSize in [128, 256]:
                                 unroll = 1
-                                #regPerThread = (TM * TN + (TM + TN) *
-                                #               (2 if leapFrog else 1)) * (
-                                #                    2 if datatype == "D" else 4)
-                                #if blockSize * regPerThread > 65536 or regPerThread > 255:
-                                #    continue
+                                regPerThread = (TM * TN + (TM + TN) *
+                                               (2 if leapFrog else 1)) * (
+                                                    2 if datatype == "D" else 4)
+                                if blockSize * regPerThread > 65536 or regPerThread > 255:
+                                    continue
 
                                 print("{:5}".format(blockSize), end="   ")
                                 kernel = Kernel(MN,
@@ -61,13 +61,13 @@ for MN in range(64, 65, 1):
                                 KK = maxBufferElements // min(
                                     kernel.M, kernel.N) // (1 if datatype == "D" else 2)
 
-                                try:
-                                    time, flops, bw = benchKernel(kernel, KK, 10)
-                                except (KeyboardInterrupt, SystemExit):
-                                    raise
-                                except:
-                                    print()
-                                    continue
+                                #try:
+                                time, flops, bw = benchKernel(kernel, KK, 10)
+                                #except (KeyboardInterrupt, SystemExit):
+                                #    raise
+                                #except:
+                                #    print()
+                                #    continue
 
 
 
